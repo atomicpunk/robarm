@@ -22,11 +22,11 @@ class XArm():
 	verbose = False
 	servonames = ['claw', 'wristroll', 'wristpitch', 'elbow', 'shoulder', 'base']
 	servoinfo = [
-		{'id': 1, 'min': 1300, 'mid': 1500, 'max': 2500, 'name': 'claw'},
+		{'id': 1, 'min': 1310, 'mid': 1500, 'max': 2500, 'name': 'claw'},
 		{'id': 2, 'min': 400,  'mid': 1430, 'max': 2600, 'name': 'wristroll'},
 		{'id': 3, 'min': 500,  'mid': 1500, 'max': 2500, 'name': 'wristpitch'},
 		{'id': 4, 'min': 400,  'mid': 1670, 'max': 2600, 'name': 'elbow'},
-		{'id': 5, 'min': 400,  'mid': 1490, 'max': 2600, 'name': 'shoulder'},
+		{'id': 5, 'min': 400,  'mid': 1480, 'max': 2600, 'name': 'shoulder'},
 		{'id': 6, 'min': 400,  'mid': 1570, 'max': 2600, 'name': 'base'},
 	]
 	def __init__(self, verbose=False):
@@ -163,23 +163,42 @@ class XArm():
 
 
 class KeyControl():
-	def __init__(self):
-		return
+	arm = None
+	servosel = -1
+	def __init__(self, armobj):
+		self.arm = armobj
 
 	def run(self):
-		with Listener(on_press=self.on_press,
-			on_release=self.on_release) as listener:
+		self.arm.rest()
+		print('Controller Ready')
+		with Listener(on_press=self.on_press, on_release=self.on_release) as listener:
 			listener.join()
-		return
+
+	def iskey(self, key, chars):
+		try:
+			if key.char in chars:
+				return True
+		except:
+			pass
+		return False
 
 	def on_press(self, key):
-		print('{0} pressed'.format(key))
+		if key == Key.esc or self.iskey(key, ['q', 'x']):
+			return False
+		if self.iskey(key, ['1', '2', '3', '4', '5', '6']):
+			self.servosel = int(key.char)
+			return True
+		if self.servosel > 0:
+			if key == Key.left:
+				self.arm.move_to(self.servosel, 'min', 500)
+			elif key == Key.down or key == Key.up:
+				self.arm.move_to(self.servosel, 'mid', 500)
+			elif key == Key.right:
+				self.arm.move_to(self.servosel, 'max', 500)
+		return True
 
 	def on_release(self, key):
-		print('{0} release'.format(key))
-		print(key)
-		if key == Key.esc or key.char in ['q', 'x']:
-			return False
+		return True
 
 if __name__ == '__main__':
 	import argparse
@@ -206,7 +225,7 @@ if __name__ == '__main__':
 	arm = XArm(args.verbose)
 	if args.control:
 		from pynput.keyboard import KeyCode, Key, Listener
-		keycont = KeyControl()
+		keycont = KeyControl(arm)
 		keycont.run()
 
 	if args.reset:
