@@ -18,6 +18,7 @@ import sys
 import struct
 
 class XArm():
+	verbose = False
 	servonames = ['claw', 'wristroll', 'wristpitch', 'elbow', 'shoulder', 'base']
 	servoinfo = [
 		{'id': 1, 'min': 1300, 'mid': 1500, 'max': 2500, 'name': 'claw'},
@@ -27,27 +28,31 @@ class XArm():
 		{'id': 5, 'min': 400,  'mid': 1490, 'max': 2600, 'name': 'shoulder'},
 		{'id': 6, 'min': 400,  'mid': 1500, 'max': 2600, 'name': 'base'},
 	]
-	def __init__(self, pid=0x5750):
+	def __init__(self, verbose=False):
 
+		self.verbose = verbose
 		# Stores an enumeration of all the connected USB HID devices
 		en = easyhid.Enumeration()
 
 		# return a list of devices based on the search parameters
-		devices = en.find(vid=0x0483, pid=pid)
+		devices = en.find(vid=0x0483, pid=0x5750)
 
 		# print a description of the devices found
-		for dev in devices:
-			print(dev.description())
+		if self.verbose:
+			for dev in devices:
+				print(dev.description())
 
 		assert len(devices) > 0
 		self.dev = devices[0]
 
 		# open a device
 		self.dev.open()
-		print('Connected to xArm device')
+		if self.verbose:
+			print('Connected to xArm device')
 
 	def __del__(self):
-		print('Closing xArm device')
+		if self.verbose:
+			print('Closing xArm device')
 		self.dev.close()
 
 	def itos(self, v):
@@ -152,6 +157,8 @@ if __name__ == '__main__':
 	import argparse
 
 	parser = argparse.ArgumentParser()
+	parser.add_argument('-v', '--verbose', action='store_true',
+		help='print verbose data')
 	parser.add_argument('-set', nargs=3, metavar=('servo', 'value', 'time'),
 		help='set a servo to a given position')
 	parser.add_argument('-reset', action='store_true',
@@ -166,7 +173,7 @@ if __name__ == '__main__':
 		parser.print_help()
 		sys.exit(1)
 
-	arm = XArm()
+	arm = XArm(args.verbose)
 	if args.reset:
 		arm.rest()
 	elif args.battery:
