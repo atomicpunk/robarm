@@ -8,7 +8,7 @@
 # https://gist.github.com/maximecb/7fd42439e8a28b9a74a4f7db68281071
 #
 # sudo apt-get install libhidapi-hidraw0 libhidapi-libusb0
-# sudo pip3 install hid easyhid
+# sudo pip3 install easyhid pynput
 #
 
 import time
@@ -18,6 +18,7 @@ import sys
 import struct
 
 class XArm():
+	dev = None
 	verbose = False
 	servonames = ['claw', 'wristroll', 'wristpitch', 'elbow', 'shoulder', 'base']
 	servoinfo = [
@@ -26,7 +27,7 @@ class XArm():
 		{'id': 3, 'min': 500,  'mid': 1500, 'max': 2500, 'name': 'wristpitch'},
 		{'id': 4, 'min': 400,  'mid': 1670, 'max': 2600, 'name': 'elbow'},
 		{'id': 5, 'min': 400,  'mid': 1490, 'max': 2600, 'name': 'shoulder'},
-		{'id': 6, 'min': 400,  'mid': 1500, 'max': 2600, 'name': 'base'},
+		{'id': 6, 'min': 400,  'mid': 1570, 'max': 2600, 'name': 'base'},
 	]
 	def __init__(self, verbose=False):
 
@@ -42,7 +43,10 @@ class XArm():
 			for dev in devices:
 				print(dev.description())
 
-		assert len(devices) > 0
+		if len(devices) < 1:
+			print('ERROR: No robotic arms found, check for terminators')
+			sys.exit(1)
+
 		self.dev = devices[0]
 
 		# open a device
@@ -53,7 +57,8 @@ class XArm():
 	def __del__(self):
 		if self.verbose:
 			print('Closing xArm device')
-		self.dev.close()
+		if self.dev:
+			self.dev.close()
 
 	def itos(self, v):
 		lsb = v & 0xFF
@@ -87,10 +92,13 @@ class XArm():
 	def move_to(self, id, pos, time=0):
 		s = self.servoInfo(id)
 		if isinstance(pos, str):
-			if pos not in ['min', 'mid', 'max']:
+			if pos in ['min', 'mid', 'max']:
+				pos = s[pos]
+			elif re.match('^[0-9]*$', pos):
+				pos = int(pos)
+			else:
 				print('ERROR: %s is not a valid position' % pos)
 				sys.exit(1)
-			pos = s[pos]
 		pos = self.clipPos(s, pos)
 
 		t_lsb, t_msb = self.itos(time)
@@ -153,6 +161,26 @@ class XArm():
 		time.sleep(2)
 		self.servos_off()
 
+
+class KeyControl():
+	def __init__(self):
+		return
+
+	def run(self):
+		with Listener(on_press=self.on_press,
+			on_release=self.on_release) as listener:
+			listener.join()
+		return
+
+	def on_press(self, key):
+		print('{0} pressed'.format(key))
+
+	def on_release(self, key):
+		print('{0} release'.format(key))
+		print(key)
+		if key == Key.esc or key.char in ['q', 'x']:
+			return False
+
 if __name__ == '__main__':
 	import argparse
 
@@ -167,6 +195,8 @@ if __name__ == '__main__':
 		help='try to read the servo positions')
 	parser.add_argument('-battery', action='store_true',
 		help='read the battery voltage')
+	parser.add_argument('-control', action='store_true',
+		help='control the robotic arm with keypresses')
 	args = parser.parse_args()
 
 	if len(sys.argv) < 2:
@@ -174,13 +204,19 @@ if __name__ == '__main__':
 		sys.exit(1)
 
 	arm = XArm(args.verbose)
+	if args.control:
+		from pynput.keyboard import KeyCode, Key, Listener
+		keycont = KeyControl()
+		keycont.run()
+
 	if args.reset:
 		arm.rest()
-	elif args.battery:
-		print('%d mV' % arm.getBattery())
-	elif args.read:
-		print(arm.read_pos())
 	elif args.set:
 		if not re.match('^[0-9]*$', args.set[2]):
 			print('ERROR: time value must be an integer, not %s' % v)
 		arm.move_to(args.set[0], args.set[1], int(args.set[2]))
+
+	if args.battery:
+		print('%d mV' % arm.getBattery())
+	elif args.read:
+		print(arm.read_pos())
