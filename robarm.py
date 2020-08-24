@@ -18,13 +18,13 @@ import sys
 import struct
 
 class XArm():
-	servonames = ['claw', 'wristyaw', 'wristpan', 'elbow', 'shoulder', 'base']
+	servonames = ['claw', 'wristroll', 'wristpitch', 'elbow', 'shoulder', 'base']
 	servoinfo = [
 		{'id': 1, 'min': 1300, 'mid': 1500, 'max': 2500, 'name': 'claw'},
-		{'id': 2, 'min': 400,  'mid': 1430, 'max': 2600, 'name': 'wristyaw'},
-		{'id': 3, 'min': 500,  'mid': 1500, 'max': 2500, 'name': 'wristpan'},
+		{'id': 2, 'min': 400,  'mid': 1430, 'max': 2600, 'name': 'wristroll'},
+		{'id': 3, 'min': 500,  'mid': 1500, 'max': 2500, 'name': 'wristpitch'},
 		{'id': 4, 'min': 400,  'mid': 1670, 'max': 2600, 'name': 'elbow'},
-		{'id': 5, 'min': 400,  'mid': 1500, 'max': 2600, 'name': 'shoulder'},
+		{'id': 5, 'min': 400,  'mid': 1490, 'max': 2600, 'name': 'shoulder'},
 		{'id': 6, 'min': 400,  'mid': 1500, 'max': 2600, 'name': 'base'},
 	]
 	def __init__(self, pid=0x5750):
@@ -81,6 +81,11 @@ class XArm():
 
 	def move_to(self, id, pos, time=0):
 		s = self.servoInfo(id)
+		if isinstance(pos, str):
+			if pos not in ['min', 'mid', 'max']:
+				print('ERROR: %s is not a valid position' % pos)
+				sys.exit(1)
+			pos = s[pos]
 		pos = self.clipPos(s, pos)
 
 		t_lsb, t_msb = self.itos(time)
@@ -169,7 +174,6 @@ if __name__ == '__main__':
 	elif args.read:
 		print(arm.read_pos())
 	elif args.set:
-		for v in [args.set[1], args.set[2]]:
-			if not re.match('^[0-9]*$', v):
-				print('ERROR: value must be an integer, not %s' % v)
-		arm.move_to(args.set[0], int(args.set[1]), int(args.set[2]))
+		if not re.match('^[0-9]*$', args.set[2]):
+			print('ERROR: time value must be an integer, not %s' % v)
+		arm.move_to(args.set[0], args.set[1], int(args.set[2]))
