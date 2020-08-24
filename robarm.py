@@ -1,32 +1,39 @@
 #!/usr/bin/env python3
-'''
-sudo apt-get install libhidapi-hidraw0 libhidapi-libusb0
-pip3 install --user hid
-
-Notes:
-- servos_off will power off the servos
-- sending a movement command wakes up unpowered servos
-- position readouts are sadly pretty slow, they can take up to 450ms
-'''
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# Robotic Arm Controller
+# Written by Todd Brandt <todd.eric.brandt@gmail.com>
+#
+# Based on xarm_control.py written by: Maxime Chevalier-Boisvert
+# https://gist.github.com/maximecb/7fd42439e8a28b9a74a4f7db68281071
+#
+# sudo apt-get install libhidapi-hidraw0 libhidapi-libusb0
+# sudo pip3 install hid easyhid
+#
 
 import time
 import easyhid
-import numpy as np
+import re
 import sys
-
-def itos(v):
-	lsb = v & 0xFF
-	msb = v >> 8
-	return lsb, msb
+import struct
 
 class XArm():
-	def __init__(self, pid=22352):
+	servonames = ['claw', 'wristyaw', 'wristpan', 'elbow', 'shoulder', 'base']
+	servoinfo = [
+		{'id': 1, 'min': 1300, 'mid': 1500, 'max': 2500, 'name': 'claw'},
+		{'id': 2, 'min': 400,  'mid': 1430, 'max': 2600, 'name': 'wristyaw'},
+		{'id': 3, 'min': 500,  'mid': 1500, 'max': 2500, 'name': 'wristpan'},
+		{'id': 4, 'min': 400,  'mid': 1670, 'max': 2600, 'name': 'elbow'},
+		{'id': 5, 'min': 400,  'mid': 1500, 'max': 2600, 'name': 'shoulder'},
+		{'id': 6, 'min': 400,  'mid': 1500, 'max': 2600, 'name': 'base'},
+	]
+	def __init__(self, pid=0x5750):
 
 		# Stores an enumeration of all the connected USB HID devices
 		en = easyhid.Enumeration()
 
 		# return a list of devices based on the search parameters
-		devices = en.find(vid=1155, pid=pid)
+		devices = en.find(vid=0x0483, pid=pid)
 
 		# print a description of the devices found
 		for dev in devices:
@@ -43,22 +50,44 @@ class XArm():
 		print('Closing xArm device')
 		self.dev.close()
 
-	def move_to(self, id, pos, time=0):
-		'''
-		CMD_SERVO_MOVE
-		0x55 0x55 len 0x03 [time_lsb time_msb, id, pos_lsb pos_msb]
-		Servo position is in range [0, 1000]
-		'''
+	def itos(self, v):
+		lsb = v & 0xFF
+		msb = v >> 8
+		return lsb, msb
 
-		t_lsb, t_msb = itos(time)
-		p_lsb, p_msb = itos(pos)
-		self.dev.write([0x55, 0x55, 8, 0x03, 1, t_lsb, t_msb, id, p_lsb, p_msb])
+	def servoIndex(self, id):
+		s = -1
+		if isinstance(id, str):
+			if re.match('^[0-9]*$', id):
+				s = int(id) - 1
+			elif id in self.servonames:
+				s = self.servonames.index(id)
+		elif isinstance(id, int):
+			s = id - 1
+		if s < 0 or s >= len(self.servonames):
+			print('ERROR: %s is not a valid servo' % id)
+			sys.exit(1)
+		return s
+
+	def servoInfo(self, id):
+		return self.servoinfo[self.servoIndex(id)]
+
+	def clipPos(self, info, pos):
+		if pos < info['min']:
+			return info['min']
+		elif pos > info['max']:
+			return info['max']
+		return pos
+
+	def move_to(self, id, pos, time=0):
+		s = self.servoInfo(id)
+		pos = self.clipPos(s, pos)
+
+		t_lsb, t_msb = self.itos(time)
+		p_lsb, p_msb = self.itos(pos)
+		self.dev.write([0x55, 0x55, 8, 0x03, 1, t_lsb, t_msb, s['id'], p_lsb, p_msb])
 
 	def move_all(self, poss, time=0):
-		'''
-		Set the position of all servos at once
-		'''
-
 		for i in range(6):
 			self.move_to(id=i+1, pos=poss[i], time=time)
 
@@ -66,11 +95,6 @@ class XArm():
 		self.dev.write([0x55, 0x55, 9, 20, 6, 1, 2, 3, 4, 5, 6])
 
 	def read_pos(self):
-		'''
-		Read the position of all 6 servos
-		ServoPositionRead 21 (byte)count { (byte)id }; (byte)count { (byte)id (ushort)position }
-		'''
-
 		self.dev.write([
 			0x55, 0x55,
 			9,  # Len
@@ -96,97 +120,56 @@ class XArm():
 			pos = (p_msb << 8) + p_lsb
 			poss.append(pos)
 
-		return np.array(poss)
+		return poss
+
+	def getBattery(self):
+		self.dev.write([0x55, 0x55, 2, 15])
+		ret = self.dev.read()
+		try:
+			out = struct.unpack('H', ret[4:6])
+		except:
+			return -1
+		return out[0]
 
 	def rest(self):
-		self.move_all([500, 500, 200, 900, 800, 500], time=1500)
+		self.move_all([
+			self.servoinfo[0]['mid'],
+			self.servoinfo[1]['mid'],
+			self.servoinfo[2]['mid'],
+			self.servoinfo[3]['mid'],
+			self.servoinfo[4]['mid'],
+			self.servoinfo[5]['mid']
+		], time=1500)
 		time.sleep(2)
 		self.servos_off()
 
+if __name__ == '__main__':
+	import argparse
 
-class SafeXArm:
-	'''
-	Wrapper to limit motion range and speed to maximize durability
-	Also remaps joint angles into the [-1, 1] range
-	'''
+	parser = argparse.ArgumentParser()
+	parser.add_argument('-set', nargs=3, metavar=('servo', 'value', 'time'),
+		help='set a servo to a given position')
+	parser.add_argument('-reset', action='store_true',
+		help='reset all servos to starting position')
+	parser.add_argument('-read', action='store_true',
+		help='try to read the servo positions')
+	parser.add_argument('-battery', action='store_true',
+		help='read the battery voltage')
+	args = parser.parse_args()
 
-	def __init__(self, **kwargs):
-		self.arm = XArm(**kwargs)
+	if len(sys.argv) < 2:
+		parser.print_help()
+		sys.exit(1)
 
-		self.min_pos = np.array([
-			100, # Base
-			200,
-			400,
-			100,
-			50,  # Wrist
-			200, # Gripper
-		])
-
-		self.max_pos = np.array([
-			900, # Base
-			800,
-			900,
-			600,
-			850,  # Wrist
-			650,  # Gripper
-		])
-
-		# Maximum movement speed in (range/second)
-		self.max_speed = 250
-
-		self.move_all([0] * 6)
-		time.sleep(2)
-
-	def read_pos(self):
-		return np.flip(self.arm.read_pos(), 0)
-
-	def rest(self):
-		return self.arm.rest()
-
-	def move_all(self, pos):
-		if not isinstance(pos, np.ndarray):
-			pos = np.array(pos)
-
-		# [-1, 1] => [0, 1]
-		pos = (pos + 1) / 2
-		target = self.min_pos + pos * (self.max_pos - self.min_pos)
-
-		target = np.flip(target, 0).astype(np.uint16)
-
-		# TODO: compute time needed based on last position
-		# Compute time needed to move each joint to target given max_speed
-		#cur_pos = self.arm.read_pos()
-		#time = (abs(cur_pos - target) / self.max_speed)
-		#time = (time * 1000).astype(np.uint16)
-
-		for i in range(6):
-			self.arm.move_to(id=i+1, pos=target[i], time=100)
-
-def demo():
-	arm = SafeXArm()
-
-	# To the right
-	arm.move_all([-1, 0, 0, 0, 0, 0])
-	time.sleep(2)
-	arm.rest()
-	sys.exit()
-	# To the left
-	arm.move_all([1, 0, 0, 0, 0, 0])
-	time.sleep(2)
-
-	# Default position
-	arm.move_all([0, 0, 0, 0, 0, 0])
-	time.sleep(2)
-
-	# Open gripper
-	arm.move_all([0, 0, 0, 0, 0, -1])
-	time.sleep(2)
-
-	# Close gripper
-	arm.move_all([0, 0, 0, 0, 0, 1])
-	time.sleep(2)
-
-	# Put the arm back in a resting position
-	arm.rest()
-
-demo()
+	arm = XArm()
+	if args.reset:
+		arm.rest()
+	elif args.battery:
+		print('%d mV' % arm.getBattery())
+	elif args.read:
+		print(arm.read_pos())
+	elif args.set:
+		for v in [args.set[1], args.set[2]]:
+			if not re.match('^[0-9]*$', v):
+				print('ERROR: value must be an integer, not %s' % v)
+		arm.move_to(args.set[0], int(args.set[1]), int(args.set[2]))
