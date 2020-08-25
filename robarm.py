@@ -16,6 +16,7 @@ import easyhid
 import re
 import sys
 import struct
+import termios
 
 class XArm():
 	dev = None
@@ -170,9 +171,22 @@ class KeyControl():
 
 	def run(self):
 		self.arm.rest()
-		print('Controller Ready')
+		self.local_echo(False)
+		print('Robot Arm Ready')
 		with Listener(on_press=self.on_press, on_release=self.on_release) as listener:
 			listener.join()
+		print('Robot Arm Off')
+		self.local_echo(True)
+
+	def local_echo(self, enable):
+		iflag, oflag, cflag, lflag, ispeed, ospeed, cc = \
+			termios.tcgetattr(sys.stdin)
+		if enable:
+			lflag |= termios.ECHO
+		else:
+			lflag &= ~termios.ECHO
+		new_attr = [iflag, oflag, cflag, lflag, ispeed, ospeed, cc]
+		termios.tcsetattr(sys.stdin, termios.TCSANOW, new_attr)
 
 	def iskey(self, key, chars):
 		try:
