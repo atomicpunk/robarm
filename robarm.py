@@ -18,28 +18,33 @@ import sys
 import struct
 import termios
 
+def local_echo(enable):
+	iflag, oflag, cflag, lflag, ispeed, ospeed, cc = \
+		termios.tcgetattr(sys.stdin)
+	if enable:
+		lflag |= termios.ECHO
+	else:
+		lflag &= ~termios.ECHO
+	new_attr = [iflag, oflag, cflag, lflag, ispeed, ospeed, cc]
+	termios.tcsetattr(sys.stdin, termios.TCSANOW, new_attr)
+
 class XArm():
 	dev = None
 	verbose = False
-	servonames = ['claw', 'wristroll', 'wristpitch', 'elbow', 'shoulder', 'base']
+	sn = ['claw', 'wristroll', 'wristpitch', 'elbow', 'shoulder', 'base']
 	servoinfo = [
-		{'id': 1, 'min': 1310, 'mid': 1500, 'max': 2500, 'name': 'claw'},
-		{'id': 2, 'min': 400,  'mid': 1430, 'max': 2600, 'name': 'wristroll'},
-		{'id': 3, 'min': 500,  'mid': 1500, 'max': 2500, 'name': 'wristpitch'},
-		{'id': 4, 'min': 400,  'mid': 1670, 'max': 2600, 'name': 'elbow'},
-		{'id': 5, 'min': 400,  'mid': 1480, 'max': 2600, 'name': 'shoulder'},
-		{'id': 6, 'min': 400,  'mid': 1570, 'max': 2600, 'name': 'base'},
+		{'id': 1, 'name': sn[0], 'min': 1310, 'mid': 1500, 'max': 2500, 'pos': -1},
+		{'id': 2, 'name': sn[1], 'min': 400,  'mid': 1430, 'max': 2600, 'pos': -1},
+		{'id': 3, 'name': sn[2], 'min': 500,  'mid': 1500, 'max': 2500, 'pos': -1},
+		{'id': 4, 'name': sn[3], 'min': 400,  'mid': 1670, 'max': 2600, 'pos': -1},
+		{'id': 5, 'name': sn[4], 'min': 400,  'mid': 1480, 'max': 2600, 'pos': -1},
+		{'id': 6, 'name': sn[5], 'min': 400,  'mid': 1570, 'max': 2600, 'pos': -1},
 	]
 	def __init__(self, verbose=False):
-
 		self.verbose = verbose
-		# Stores an enumeration of all the connected USB HID devices
 		en = easyhid.Enumeration()
-
-		# return a list of devices based on the search parameters
 		devices = en.find(vid=0x0483, pid=0x5750)
 
-		# print a description of the devices found
 		if self.verbose:
 			for dev in devices:
 				print(dev.description())
@@ -49,8 +54,6 @@ class XArm():
 			sys.exit(1)
 
 		self.dev = devices[0]
-
-		# open a device
 		self.dev.open()
 		if self.verbose:
 			print('Connected to xArm device')
@@ -60,6 +63,7 @@ class XArm():
 			print('Closing xArm device')
 		if self.dev:
 			self.dev.close()
+		local_echo(True)
 
 	def itos(self, v):
 		lsb = v & 0xFF
@@ -71,11 +75,11 @@ class XArm():
 		if isinstance(id, str):
 			if re.match('^[0-9]*$', id):
 				s = int(id) - 1
-			elif id in self.servonames:
-				s = self.servonames.index(id)
+			elif id in self.sn:
+				s = self.sn.index(id)
 		elif isinstance(id, int):
 			s = id - 1
-		if s < 0 or s >= len(self.servonames):
+		if s < 0 or s >= len(self.sn):
 			print('ERROR: %s is not a valid servo' % id)
 			sys.exit(1)
 		return s
@@ -90,7 +94,7 @@ class XArm():
 			return info['max']
 		return pos
 
-	def move_to(self, id, pos, time=0):
+	def moveTo(self, id, pos, time=0):
 		s = self.servoInfo(id)
 		if isinstance(pos, str):
 			if pos in ['min', 'mid', 'max']:
@@ -100,15 +104,23 @@ class XArm():
 			else:
 				print('ERROR: %s is not a valid position' % pos)
 				sys.exit(1)
-		pos = self.clipPos(s, pos)
-
+		s['pos'] = self.clipPos(s, pos)
 		t_lsb, t_msb = self.itos(time)
-		p_lsb, p_msb = self.itos(pos)
+		p_lsb, p_msb = self.itos(s['pos'])
+		self.dev.write([0x55, 0x55, 8, 0x03, 1, t_lsb, t_msb, s['id'], p_lsb, p_msb])
+
+	def moveRel(self, id, dpos, time=0):
+		s = self.servoInfo(id)
+		if s['pos'] < 0:
+			return
+		s['pos'] = self.clipPos(s, s['pos'] + dpos)
+		t_lsb, t_msb = self.itos(time)
+		p_lsb, p_msb = self.itos(s['pos'])
 		self.dev.write([0x55, 0x55, 8, 0x03, 1, t_lsb, t_msb, s['id'], p_lsb, p_msb])
 
 	def move_all(self, poss, time=0):
 		for i in range(6):
-			self.move_to(id=i+1, pos=poss[i], time=time)
+			self.moveTo(id=i+1, pos=poss[i], time=time)
 
 	def servos_off(self):
 		self.dev.write([0x55, 0x55, 9, 20, 6, 1, 2, 3, 4, 5, 6])
@@ -126,11 +138,9 @@ class XArm():
 			5,
 			6
 		])
-
 		ret = self.dev.read()
 		count = ret[4]
 		assert count == 6
-
 		poss = []
 		for i in range(6):
 			id = ret[5 + 3*i]
@@ -138,7 +148,6 @@ class XArm():
 			p_msb = ret[5 + 3*i + 2]
 			pos = (p_msb << 8) + p_lsb
 			poss.append(pos)
-
 		return poss
 
 	def getBattery(self):
@@ -165,28 +174,17 @@ class XArm():
 
 class KeyControl():
 	arm = None
-	servosel = -1
+	servosel = 6
 	def __init__(self, armobj):
 		self.arm = armobj
 
 	def run(self):
 		self.arm.rest()
-		self.local_echo(False)
+		local_echo(False)
 		print('Robot Arm Ready')
 		with Listener(on_press=self.on_press, on_release=self.on_release) as listener:
 			listener.join()
 		print('Robot Arm Off')
-		self.local_echo(True)
-
-	def local_echo(self, enable):
-		iflag, oflag, cflag, lflag, ispeed, ospeed, cc = \
-			termios.tcgetattr(sys.stdin)
-		if enable:
-			lflag |= termios.ECHO
-		else:
-			lflag &= ~termios.ECHO
-		new_attr = [iflag, oflag, cflag, lflag, ispeed, ospeed, cc]
-		termios.tcsetattr(sys.stdin, termios.TCSANOW, new_attr)
 
 	def iskey(self, key, chars):
 		try:
@@ -203,12 +201,12 @@ class KeyControl():
 			self.servosel = int(key.char)
 			return True
 		if self.servosel > 0:
-			if key == Key.left:
-				self.arm.move_to(self.servosel, 'min', 500)
-			elif key == Key.down or key == Key.up:
-				self.arm.move_to(self.servosel, 'mid', 500)
-			elif key == Key.right:
-				self.arm.move_to(self.servosel, 'max', 500)
+			if key == Key.left or key == Key.down:
+				self.arm.moveRel(self.servosel, -50, 100)
+			elif key == Key.right or key == Key.up:
+				self.arm.moveRel(self.servosel, 50, 100)
+			elif key == Key.space:
+				self.arm.moveTo(self.servosel, 'mid', 500)
 		return True
 
 	def on_release(self, key):
@@ -244,10 +242,11 @@ if __name__ == '__main__':
 
 	if args.reset:
 		arm.rest()
+		print(arm.servoinfo)
 	elif args.set:
 		if not re.match('^[0-9]*$', args.set[2]):
 			print('ERROR: time value must be an integer, not %s' % v)
-		arm.move_to(args.set[0], args.set[1], int(args.set[2]))
+		arm.moveTo(args.set[0], args.set[1], int(args.set[2]))
 
 	if args.battery:
 		print('%d mV' % arm.getBattery())
