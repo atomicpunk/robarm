@@ -215,7 +215,7 @@ class KeyControl():
 			self.servosel = int(key.char)
 			return True
 		if self.servosel > 0:
-			delta = 100 if dt < 0.1 and key == self.lastkey else 30
+			delta = 100 if dt < 0.1 and key == self.lastkey else 20
 			if key == Key.left or key == Key.down:
 				if self.servosel in [3,4,6]:
 					self.arm.moveRel(self.servosel, delta, 100)
@@ -249,7 +249,7 @@ if __name__ == '__main__':
 	parser.add_argument('-battery', action='store_true',
 		help='read the battery voltage')
 	parser.add_argument('-control', action='store_true',
-		help='control the robotic arm with keypresses')
+		help='Keyboard control. First type 1-6 to select a servo, then left/right or up/down to move. Hold key for fast move.')
 	args = parser.parse_args()
 
 	if len(sys.argv) < 2:
