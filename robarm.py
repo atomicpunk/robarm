@@ -17,6 +17,7 @@ import re
 import sys
 import struct
 import termios
+from datetime import datetime, timedelta
 
 def local_echo(enable):
 	iflag, oflag, cflag, lflag, ispeed, ospeed, cc = \
@@ -175,8 +176,11 @@ class XArm():
 class KeyControl():
 	arm = None
 	servosel = 6
+	last = 0
+	lastkey = 0
 	def __init__(self, armobj):
 		self.arm = armobj
+		self.last = datetime.now()
 
 	def run(self):
 		self.arm.rest()
@@ -195,18 +199,36 @@ class KeyControl():
 		return False
 
 	def on_press(self, key):
+		# exit keys
 		if key == Key.esc or self.iskey(key, ['q', 'x']):
 			return False
+
+		# limit keypresses to 10 per second
+		now = datetime.now()
+		dt = (now - self.last).total_seconds()
+		if dt < 0.05:
+			return True
+		self.last = now
+
+		# process the keys
 		if self.iskey(key, ['1', '2', '3', '4', '5', '6']):
 			self.servosel = int(key.char)
 			return True
 		if self.servosel > 0:
+			delta = 100 if dt < 0.1 and key == self.lastkey else 30
 			if key == Key.left or key == Key.down:
-				self.arm.moveRel(self.servosel, -50, 100)
+				if self.servosel in [3,4,6]:
+					self.arm.moveRel(self.servosel, delta, 100)
+				else:
+					self.arm.moveRel(self.servosel, -1 * delta, 100)
 			elif key == Key.right or key == Key.up:
-				self.arm.moveRel(self.servosel, 50, 100)
+				if self.servosel in [3,4,6]:
+					self.arm.moveRel(self.servosel, -1 * delta, 100)
+				else:
+					self.arm.moveRel(self.servosel, delta, 100)
 			elif key == Key.space:
 				self.arm.moveTo(self.servosel, 'mid', 500)
+			self.lastkey = key
 		return True
 
 	def on_release(self, key):
